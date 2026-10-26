@@ -8,12 +8,14 @@ Copyright (c) 2026 Культяпов Андрей (Camellan)
 
 ПРОГРАММНОЕ ОБЕСПЕЧЕНИЕ ПРЕДОСТАВЛЯЕТСЯ «КАК ЕСТЬ», БЕЗ КАКИХ-ЛИБО ГАРАНТИЙ, ЯВНЫХ ИЛИ ПОДРАЗУМЕВАЕМЫХ, ВКЛЮЧАЯ, НО НЕ ОГРАНИЧИВАЯСЬ ГАРАНТИЯМИ КОМЕРЧЕСКОЙ ЦЕННОСТИ И ПРИГОДНОСТИ ДЛЯ ОПРЕДЕЛЁННЫХ ЦЕЛЕЙ. АВТОРЫ И ПРАВООБЛАДАТЕЛИ НЕ НЕСУТ ОТВЕТСТВЕННОСТИ ЗА КАКИЕ-ЛИБО ИСКИ, УЩЕРБ ИЛИ ДРУГИЕ ТРЕБОВАНИЯ, ВОЗНИКШИЕ ИЗ ИЛИ В СВЯЗИ С ИСПОЛЬЗОВАНИЕМ ПРОГРАММНОГО ОБЕСПЕЧЕНИЯ ИЛИ ЕГО ИСПОЛЬЗОВАНИЕМ ИЛИ ИНЫМИ ДЕЙСТВИЯМИ.
 
+
 import sys
 import os
 import re
 from datetime import date, datetime
 from pathlib import Path
 from typing import Optional
+from collections import Counter
 
 import pandas as pd
 
@@ -85,6 +87,7 @@ class VinAnalyzerApp(QMainWindow):
         self.loaded_files: list[Path] = []
         self.file_data: dict[str, pd.DataFrame] = {}
         self.df_filtered: Optional[pd.DataFrame] = None
+        self.sequence_ratio_label = None
         self.init_ui()
 
     def init_ui(self):
@@ -166,6 +169,9 @@ class VinAnalyzerApp(QMainWindow):
         self.bjoc_counter_label = QLabel("Количество BJOC: 0")
         self.bjoc_counter_label.setStyleSheet("font-size: 14px; color: #ef6c00; font-weight: bold;")
         stats_layout.addWidget(self.bjoc_counter_label)
+        self.sequence_ratio_label = QLabel("Очерёдность LJO/BJO(C): —")
+        self.sequence_ratio_label.setStyleSheet("font-size: 14px; color: #A0A0A0; font-weight: bold;")
+        stats_layout.addWidget(self.sequence_ratio_label)
         top_layout.addWidget(stats_group, stretch=1)
         main_layout.addLayout(top_layout)
 
@@ -360,7 +366,7 @@ class VinAnalyzerApp(QMainWindow):
             "<p><b>Разработчик:</b> Культяпов А.В. / 6152 / 021А</p>"
             "<p>Исходный код проекта:<br>"
             "<a href='https://github.com/camellan/plan'>https://github.com/camellan/plan</a></p>"
-            "<p><b>Версия:</b> 1.1.0</p>"
+            "<p><b>Версия:</b> 1.2.0</p>"
             '<p>© ПСК "ИСКРА", 2026</p>'
         )
         QMessageBox.information(self, "О программе", about_text)
@@ -405,6 +411,13 @@ class VinAnalyzerApp(QMainWindow):
         bjoc_count = ((models_series == "BJO") & (extra_series == "VSUVE")).sum()
         total_bjo = (models_series == "BJO").sum()
         bjo_count = total_bjo - bjoc_count
+        
+        # --- РАСЧЁТ САМОГО ЧАСТОГО РАЗМЕРА ПАЧКИ (МОДА) ---
+        mode_ljo, mode_bjo_c = self._get_most_common_run_sizes(models_series)
+
+        ratio_text = f"Очерёдность LJO/BJO(C): {mode_ljo}/{mode_bjo_c}"
+        self.sequence_ratio_label.setText(ratio_text)
+        # ----------------------------------------------------     
 
         self.ljo_counter_label.setText(f"Количество LJO: {ljo_count}")
         self.bjo_counter_label.setText(f"Количество BJO: {bjo_count}")
@@ -418,6 +431,48 @@ class VinAnalyzerApp(QMainWindow):
             for col_idx, value in enumerate(row):
                 self.table_widget.setItem(row_idx, col_idx, QTableWidgetItem(str(value)))
         self.status_bar.showMessage(f"Анализ завершен. Найдено строк в плане: {len(display_df)}")
+        
+    from collections import Counter
+
+    @staticmethod
+    def _most_common_size(sizes: list[int]) -> int:
+        """Самый частый размер пачки. При равенстве частот — минимальный."""
+        if not sizes:
+            return 0
+        counter = Counter(sizes)
+        max_count = max(counter.values())
+        candidates = [size for size, count in counter.items() if count == max_count]
+        return min(candidates)
+
+    def _get_most_common_run_sizes(self, models_series: pd.Series):
+        """Находит самый частый размер непрерывной пачки для LJO и BJO(C)."""
+        if models_series.empty:
+            return 0, 0
+
+        simplified = models_series.apply(lambda x: "BJO(C)" if x == "BJO" else x)
+
+        runs = []
+        current_model = simplified.iloc[0]
+        run_len = 1
+
+        for val in simplified.iloc[1:]:
+            if val == current_model:
+                run_len += 1
+            else:
+                runs.append((current_model, run_len))
+                current_model = val
+                run_len = 1
+        runs.append((current_model, run_len))  # последняя пачка
+
+        ljo_lengths = [length for model, length in runs if model == "LJO"]
+        bjo_lengths = [length for model, length in runs if model == "BJO(C)"]
+
+        mode_ljo = self._most_common_size(ljo_lengths)
+        mode_bjo = self._most_common_size(bjo_lengths)
+
+        return mode_ljo, mode_bjo
+
+        
 
 
 if __name__ == "__main__":
@@ -429,7 +484,7 @@ if __name__ == "__main__":
 
     # Подключаем переводчик (если есть файлы переводов Qt)
     translator = QTranslator()
-    if translator.load("qtbase_ru", ":/translations"):
+    if translator.load(get_resource_path("qtbase_ru"), get_resource_path("translations")):
         app.installTranslator(translator)
         
     window = VinAnalyzerApp()
