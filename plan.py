@@ -243,6 +243,8 @@ class VinAnalyzerApp(QMainWindow):
         self.ljo_counter_label.setText("Количество LJO: 0")
         self.bjo_counter_label.setText("Количество BJO: 0")
         self.bjoc_counter_label.setText("Количество BJOC: 0")
+
+self.sequence_ratio_label.setText("Очерёдность LJO/BJO(C): —")
         self.table_widget.setRowCount(0)
         self.table_widget.setColumnCount(0)
 
