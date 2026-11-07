@@ -1,24 +1,42 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+block_cipher = None
 
 a = Analysis(
     ['plan.py'],
     pathex=[],
     binaries=[],
-    datas=[('lada.ico', '.')],
-    hiddenimports=[],
+    datas=[
+        ('lada.ico', '.'),
+    ],
+    hiddenimports=[
+        'openpyxl',
+        'xlrd',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'tkinter',
+        'matplotlib',
+        'scipy',
+        'PIL',
+        'PyQt5',
+        'PySide6',
+    ],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
     noarchive=False,
 )
-pyz = PYZ(a.pure)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
+    a.zipfiles,
     a.datas,
     [],
     name='plan',
@@ -34,5 +52,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['lada.ico'],
+    icon='lada.ico',
 )
