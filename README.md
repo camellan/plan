@@ -52,6 +52,6 @@ pyinstaller --clean plan.spec
 
 ## Лицензия и авторство
 
-* **Разработчик:** Культяпов А.В. (Camellan)
-* **Репозиторий:** [://github.com](https://://github.com://camellan)
+* **Разработчик:** Культяпов А.В. / 6152 / 021А (Camellan)
+* **Репозиторий:** [https://github.com/camellan/plan](https://github.com/camellan/plan)
 * **Лицензия:** MIT © ПСК «ИСКРА», 2026
