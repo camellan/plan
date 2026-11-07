@@ -1,4 +1,4 @@
-# Лицензия MIT
+# SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Культяпов Андрей (Camellan)
 
 import sys
@@ -19,7 +19,7 @@ import pandas as pd
 if sys.platform == "win32":
     import ctypes
     import winreg
-    myappid = 'psk.iskra.vinanalyzer.1.0'
+    myappid = 'psk.iskra.vinanalyzer.1.3'
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
 from PyQt6.QtWidgets import (
@@ -157,12 +157,11 @@ class VinAnalyzerApp(QMainWindow):
             "Перетащите сюда один или несколько Excel-файлов\n"
             "или нажмите «Добавить файлы…»"
         )
+        self.drop_zone.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.drop_zone.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.drop_zone.setWordWrap(True)
-        self.drop_zone.setStyleSheet(
-            "border: 2px dashed gray; padding: 15px; font-size: 13px; "
-            "color: gray; background-color: #f9f9f9;"
-        )
+        self.reset_drop_zone_style()
+
         top_layout.addWidget(self.drop_zone, stretch=2)
 
         inputs_group = QWidget()
@@ -203,12 +202,32 @@ class VinAnalyzerApp(QMainWindow):
         inputs_layout.addLayout(plan_layout)
 
         self.analyze_button = QPushButton("Анализ")
+        self.analyze_button.setFixedWidth(120)
         self.analyze_button.setStyleSheet(
-            "font-weight: bold; background-color: #e8f5e9; color: #2e7d32; "
-            "border: 1px solid #a5d6a7; padding: 5px;"
+            "QPushButton {"
+            "  font-weight: bold;"
+            "  background-color: #e8f5e9;"
+            "  color: #2e7d32;"
+            "  border: 1px solid #a5d6a7;"
+            "  border-radius: 4px;"
+            "  padding: 5px;"
+            "}"
+            "QPushButton:hover {"
+            "  background-color: #dcedc8;"
+            "}"
+            "QPushButton:pressed {"
+            "  background-color: #c5e1a5;"
+            "}"
         )
         self.analyze_button.clicked.connect(self.analyze_data)
-        inputs_layout.addWidget(self.analyze_button)
+
+        analyze_layout = QHBoxLayout()
+        analyze_layout.addStretch()
+        analyze_layout.addWidget(self.analyze_button)
+        inputs_layout.addLayout(analyze_layout)
+
+
+
         top_layout.addWidget(inputs_group, stretch=2)
 
         stats_group = QWidget()
@@ -233,7 +252,7 @@ class VinAnalyzerApp(QMainWindow):
         stats_layout.addWidget(self.bjoc_counter_label)
 
         self.sequence_ratio_label = QLabel("Очерёдность LJO/BJO(C): —")
-        self.sequence_ratio_label.setStyleSheet("font-size: 14px; color: #A0A0A0; font-weight: bold;")
+        self.sequence_ratio_label.setStyleSheet("font-size: 14px; color: #424242; font-weight: bold;")
         stats_layout.addWidget(self.sequence_ratio_label)
 
         top_layout.addWidget(stats_group, stretch=1)
@@ -328,8 +347,22 @@ class VinAnalyzerApp(QMainWindow):
         self._force_quit = True
         self.save_settings()
         self.save_session_cache()
-        self.tray_icon.hide()
+
+        # 1. Закрываем локальный сервер одиночного запуска
+        if hasattr(self, "instance_server") and self.instance_server is not None:
+            self.instance_server.close()
+            QLocalServer.removeServer(SINGLE_INSTANCE_KEY)
+
+        # 2. Скрываем и освобождаем иконку трея
+        if hasattr(self, "tray_icon") and self.tray_icon is not None:
+            self.tray_icon.hide()
+            self.tray_icon.deleteLater()
+
+        # 3. Возвращаем стандартное поведение выхода и закрываем окно
+        QApplication.setQuitOnLastWindowClosed(True)
+        self.close()
         QApplication.quit()
+
 
     def closeEvent(self, event: QCloseEvent):
         self.save_settings()
@@ -351,13 +384,13 @@ class VinAnalyzerApp(QMainWindow):
             )
             return
         elif saved_action == "exit":
-            self.tray_icon.hide()
             event.accept()
+            self.quit_application()
             return
 
         msg_box = QMessageBox(self)
         msg_box.setWindowTitle("Закрытие программы")
-        msg_box.setText("Свернуть программу в системный трей или завершить работу?")
+        msg_box.setText("Свернуть программу в системный трей\nили завершить работу?")
         msg_box.setIcon(QMessageBox.Icon.Question)
 
         tray_btn = msg_box.addButton("В трей", QMessageBox.ButtonRole.AcceptRole)
@@ -386,8 +419,9 @@ class VinAnalyzerApp(QMainWindow):
         elif clicked == exit_btn:
             if remember_cb.isChecked():
                 self.settings.setValue("close_action", "exit")
-            self.tray_icon.hide()
             event.accept()
+            self.quit_application()
+
     # --- Сохранение и восстановление настроек и сессии ---
     def save_settings(self):
         self.settings.setValue("geometry", self.saveGeometry())
@@ -469,6 +503,7 @@ class VinAnalyzerApp(QMainWindow):
         self.drop_zone.setText(
             f"Загружено файлов: {len(self.loaded_files)}\n\n" + "\n".join(file_lines)
         )
+        self.reset_drop_zone_style()
 
         status_msg = f"Загружено файлов: {len(self.loaded_files)}. Строк с LJO/BJO: {len(self.df_filtered)}"
         if restored_from_cache:
@@ -484,8 +519,10 @@ class VinAnalyzerApp(QMainWindow):
             if paths and all(path.suffix.lower() in EXCEL_EXTENSIONS for path in paths):
                 event.acceptProposedAction()
                 self.drop_zone.setStyleSheet(
-                    "border: 2px dashed green; padding: 15px; color: green; background-color: #e8f5e9;"
+                    "border: 2px dashed #2e7d32; border-radius: 6px; padding: 15px; "
+                    "font-size: 13px; color: #1b5e20; background-color: #c8e6c9;"
                 )
+
 
     def dragLeaveEvent(self, event):
         self.reset_drop_zone_style()
@@ -502,9 +539,20 @@ class VinAnalyzerApp(QMainWindow):
             event.acceptProposedAction()
 
     def reset_drop_zone_style(self):
-        self.drop_zone.setStyleSheet(
-            "border: 2px dashed gray; padding: 15px; color: gray; background-color: #f9f9f9;"
-        )
+        if self.loaded_files:
+            # Стиль, когда файлы уже загружены
+            self.drop_zone.setStyleSheet(
+                "border: 1px solid #90caf9; border-radius: 6px; padding: 15px; "
+                "font-size: 13px; color: #0d47a1; background-color: #e3f2fd;"
+            )
+        else:
+            # Стиль пустого поля (ожидание загрузки)
+            self.drop_zone.setStyleSheet(
+                "border: 2px dashed gray; border-radius: 6px; padding: 15px; "
+                "font-size: 13px; color: gray; background-color: #f9f9f9;"
+            )
+
+
     def select_files_via_dialog(self):
         last_dir = str(self.settings.value("last_open_dir", ""))
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -600,15 +648,19 @@ class VinAnalyzerApp(QMainWindow):
                 + "\n\n".join(warnings)
                 + "\n\nПродолжить загрузку файлов?"
             )
-            answer = QMessageBox.warning(
-                self,
-                "Проверка последовательности дат",
-                message,
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            return answer == QMessageBox.StandardButton.Yes
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("Проверка последовательности дат")
+            msg_box.setText(message)
+            msg_box.setIcon(QMessageBox.Icon.Warning)
+
+            yes_btn = msg_box.addButton("Да", QMessageBox.ButtonRole.YesRole)
+            no_btn = msg_box.addButton("Нет", QMessageBox.ButtonRole.NoRole)
+            msg_box.setDefaultButton(no_btn)
+
+            msg_box.exec()
+            return msg_box.clickedButton() == yes_btn
         return True
+
 
     def add_excel_files(self, file_paths: list[Path]):
         new_files = list()
@@ -648,7 +700,7 @@ class VinAnalyzerApp(QMainWindow):
             "<p>Программа для автоматизации обработки планов производства.</p>"
             "<p><b>Разработчик:</b> Культяпов А.В. / 6152 / 021А</p>"
             "<p>Исходный код проекта:<br>"
-            "<a href='https://github.com'>https://github.com</a></p>"
+            "<a href='https://github.com/camellan/plan'>https://github.com/camellan/plan</a></p>"
             "<p><b>Версия:</b> 1.3.0</p>"
             '<p>© ПСК "ИСКРА", 2026</p>'
         )
@@ -760,19 +812,17 @@ if __name__ == "__main__":
     probe_socket = QLocalSocket()
     probe_socket.connectToServer(SINGLE_INSTANCE_KEY)
     if probe_socket.waitForConnected(300):
-        # Если программа запущена вручную (без --autostart), просим первую копию развернуть окно
         if "--autostart" not in sys.argv:
             probe_socket.write(b"SHOW")
             probe_socket.waitForBytesWritten(300)
         probe_socket.disconnectFromServer()
+        probe_socket.close()
         sys.exit(0)
 
-    # Очищаем возможный «зависший» сокет после аварийного завершения
     QLocalServer.removeServer(SINGLE_INSTANCE_KEY)
     instance_server = QLocalServer()
     instance_server.listen(SINGLE_INSTANCE_KEY)
 
-    # Не завершать приложение при скрытии окна в трей
     app.setQuitOnLastWindowClosed(False)
 
     locale = QLocale(QLocale.Language.Russian, QLocale.Country.Russia)
@@ -785,10 +835,17 @@ if __name__ == "__main__":
     window = VinAnalyzerApp()
     window.attach_single_instance_server(instance_server)
 
-    # Если программа запущена системой с ключом --autostart — оставляем её в трее
     if "--autostart" in sys.argv:
         window.hide()
     else:
         window.show()
 
-    sys.exit(app.exec())
+    exit_code = app.exec()
+
+    # Гарантированно освобождаем ресурсы до завершения python.exe
+    instance_server.close()
+    QLocalServer.removeServer(SINGLE_INSTANCE_KEY)
+    del window
+    del instance_server
+
+    sys.exit(exit_code)
