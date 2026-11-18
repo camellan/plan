@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Культяпов Андрей (Camellan)
 
-import sys
 import os
-import re
 import pickle
+import re
+import sys
+from collections import Counter
 from datetime import date
 from pathlib import Path
-from typing import Optional
-from collections import Counter
+
 from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 
 SINGLE_INSTANCE_KEY = "PSK_ISKRA_PlanAnalyzer_SingleInstance"
@@ -19,30 +19,40 @@ import pandas as pd
 if sys.platform == "win32":
     import ctypes
     import winreg
-    myappid = 'psk.iskra.vinanalyzer.1.3'
+
+    myappid = "psk.iskra.vinanalyzer.1.3"
     ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
 
+import itertools
+
+from PyQt6.QtCore import QLocale, QSettings, Qt, QTranslator
+from PyQt6.QtGui import (
+    QAction,
+    QCloseEvent,
+    QDragEnterEvent,
+    QDropEvent,
+    QIcon,
+    QIntValidator,
+)
 from PyQt6.QtWidgets import (
     QApplication,
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QPushButton,
+    QCheckBox,
     QFileDialog,
+    QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
+    QMainWindow,
+    QMenu,
+    QMessageBox,
+    QPushButton,
     QStatusBar,
+    QSystemTrayIcon,
     QTableWidget,
     QTableWidgetItem,
-    QHeaderView,
-    QMessageBox,
-    QSystemTrayIcon,
-    QMenu,
-    QCheckBox,
+    QVBoxLayout,
+    QWidget,
 )
-from PyQt6.QtCore import Qt, QLocale, QTranslator, QSettings
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QIntValidator, QIcon, QAction, QCloseEvent
 
 EXCEL_EXTENSIONS = (".xlsx", ".xls", ".xlsm")
 REQUIRED_COLUMNS = {"модель", "vin", "доп версия"}
@@ -85,7 +95,9 @@ def is_autostart_enabled() -> bool:
     if sys.platform != "win32":
         return False
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_READ) as key:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_READ
+        ) as key:
             value, _ = winreg.QueryValueEx(key, APP_REG_NAME)
             return bool(value)
     except OSError:
@@ -97,9 +109,13 @@ def set_autostart(enabled: bool) -> bool:
     if sys.platform != "win32":
         return False
     try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_SET_VALUE) as key:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, RUN_REG_PATH, 0, winreg.KEY_SET_VALUE
+        ) as key:
             if enabled:
-                winreg.SetValueEx(key, APP_REG_NAME, 0, winreg.REG_SZ, get_autostart_command())
+                winreg.SetValueEx(
+                    key, APP_REG_NAME, 0, winreg.REG_SZ, get_autostart_command()
+                )
             else:
                 try:
                     winreg.DeleteValue(key, APP_REG_NAME)
@@ -108,7 +124,9 @@ def set_autostart(enabled: bool) -> bool:
         return True
     except OSError:
         return False
-def extract_date_from_filename(file_path: Path) -> Optional[date]:
+
+
+def extract_date_from_filename(file_path: Path) -> date | None:
     """Извлекает дату ДД.ММ.ГГГГ или ДД,ММ,ГГГГ из имени файла."""
     match = re.search(r"(?<!\d)(\d{1,2})[.,](\d{1,2})[.,](\d{4})(?!\d)", file_path.stem)
     if not match:
@@ -139,9 +157,9 @@ class VinAnalyzerApp(QMainWindow):
         self.cache_file = get_app_data_dir() / "session_cache.pkl"
         self._force_quit = False
 
-        self.loaded_files: list[Path] = list()
-        self.file_data: dict[str, pd.DataFrame] = dict()
-        self.df_filtered: Optional[pd.DataFrame] = None
+        self.loaded_files: list[Path] = []
+        self.file_data: dict[str, pd.DataFrame] = {}
+        self.df_filtered: pd.DataFrame | None = None
         self.sequence_ratio_label = None
 
         self.init_ui()
@@ -226,8 +244,6 @@ class VinAnalyzerApp(QMainWindow):
         analyze_layout.addWidget(self.analyze_button)
         inputs_layout.addLayout(analyze_layout)
 
-
-
         top_layout.addWidget(inputs_group, stretch=2)
 
         stats_group = QWidget()
@@ -240,32 +256,43 @@ class VinAnalyzerApp(QMainWindow):
         stats_layout.addWidget(results_title)
 
         self.ljo_counter_label = QLabel("Количество LJO: 0")
-        self.ljo_counter_label.setStyleSheet("font-size: 14px; color: #1565c0; font-weight: bold;")
+        self.ljo_counter_label.setStyleSheet(
+            "font-size: 14px; color: #1565c0; font-weight: bold;"
+        )
         stats_layout.addWidget(self.ljo_counter_label)
 
         self.bjo_counter_label = QLabel("Количество BJO: 0")
-        self.bjo_counter_label.setStyleSheet("font-size: 14px; color: #43a047; font-weight: bold;")
+        self.bjo_counter_label.setStyleSheet(
+            "font-size: 14px; color: #43a047; font-weight: bold;"
+        )
         stats_layout.addWidget(self.bjo_counter_label)
 
         self.bjoc_counter_label = QLabel("Количество BJOC: 0")
-        self.bjoc_counter_label.setStyleSheet("font-size: 14px; color: #ef6c00; font-weight: bold;")
+        self.bjoc_counter_label.setStyleSheet(
+            "font-size: 14px; color: #ef6c00; font-weight: bold;"
+        )
         stats_layout.addWidget(self.bjoc_counter_label)
 
         self.sequence_ratio_label = QLabel("Очерёдность LJO/BJO(C): —")
-        self.sequence_ratio_label.setStyleSheet("font-size: 14px; color: #424242; font-weight: bold;")
+        self.sequence_ratio_label.setStyleSheet(
+            "font-size: 14px; color: #424242; font-weight: bold;"
+        )
         stats_layout.addWidget(self.sequence_ratio_label)
 
         top_layout.addWidget(stats_group, stretch=1)
         main_layout.addLayout(top_layout)
 
         self.table_widget = QTableWidget()
-        self.table_widget.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table_widget.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
         main_layout.addWidget(self.table_widget)
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ожидание загрузки файлов…")
         self.setCentralWidget(central_widget)
+
     # --- Системный трей и автозапуск ---
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self.app_icon, self)
@@ -363,7 +390,6 @@ class VinAnalyzerApp(QMainWindow):
         self.close()
         QApplication.quit()
 
-
     def closeEvent(self, event: QCloseEvent):
         self.save_settings()
         self.save_session_cache()
@@ -437,7 +463,7 @@ class VinAnalyzerApp(QMainWindow):
             }
             with open(self.cache_file, "wb") as f:
                 pickle.dump(payload, f)
-        except Exception:
+        except (OSError, pickle.PickleError):
             pass
 
     def restore_state_and_session(self):
@@ -463,8 +489,8 @@ class VinAnalyzerApp(QMainWindow):
             with open(self.cache_file, "rb") as f:
                 payload = pickle.load(f)
 
-            raw_paths = payload.get("loaded_files", list())
-            cached_data = payload.get("file_data", dict())
+            raw_paths = payload.get("loaded_files", [])
+            cached_data = payload.get("file_data", {})
 
             if not raw_paths or not cached_data:
                 return
@@ -474,27 +500,38 @@ class VinAnalyzerApp(QMainWindow):
             self._rebuild_combined_dataframe(restored_from_cache=True)
 
             # Если ранее были введены VIN и План — автоматически восстанавливаем таблицу расчёта
-            if saved_vin and saved_plan and self.df_filtered is not None and not self.df_filtered.empty:
+            if (
+                saved_vin
+                and saved_plan
+                and self.df_filtered is not None
+                and not self.df_filtered.empty
+            ):
                 self.analyze_data(silent=True)
 
-        except Exception:
-            self.loaded_files = list()
-            self.file_data = dict()
+        except (OSError, pickle.PickleError, EOFError, AttributeError, KeyError, TypeError, ValueError):
+            self.loaded_files = []
+            self.file_data = {}
             self.df_filtered = None
 
     def _rebuild_combined_dataframe(self, restored_from_cache: bool = False):
-        frames = [self.file_data[str(path)] for path in self.loaded_files if str(path) in self.file_data]
+        frames = [
+            self.file_data[str(path)]
+            for path in self.loaded_files
+            if str(path) in self.file_data
+        ]
         self.df_filtered = (
             pd.concat(frames, ignore_index=True)
             if frames
             else pd.DataFrame(columns=["Модель", "VIN", "ДОП ВЕРСИЯ"])
         )
 
-        file_lines = list()
+        file_lines = []
         missing_count = 0
         for path in self.loaded_files:
             file_date = extract_date_from_filename(path)
-            date_str = file_date.strftime("%d.%m.%Y") if file_date else "дата не распознана"
+            date_str = (
+                file_date.strftime("%d.%m.%Y") if file_date else "дата не распознана"
+            )
             exists_mark = "" if path.exists() else " [из кэша, исходный файл удалён]"
             if not path.exists():
                 missing_count += 1
@@ -515,14 +552,17 @@ class VinAnalyzerApp(QMainWindow):
     # --- Drag and drop: принимаем сразу несколько файлов ---
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
-            paths = [Path(url.toLocalFile()) for url in event.mimeData().urls() if url.isLocalFile()]
+            paths = [
+                Path(url.toLocalFile())
+                for url in event.mimeData().urls()
+                if url.isLocalFile()
+            ]
             if paths and all(path.suffix.lower() in EXCEL_EXTENSIONS for path in paths):
                 event.acceptProposedAction()
                 self.drop_zone.setStyleSheet(
                     "border: 2px dashed #2e7d32; border-radius: 6px; padding: 15px; "
                     "font-size: 13px; color: #1b5e20; background-color: #c8e6c9;"
                 )
-
 
     def dragLeaveEvent(self, event):
         self.reset_drop_zone_style()
@@ -532,7 +572,8 @@ class VinAnalyzerApp(QMainWindow):
         paths = [
             Path(url.toLocalFile())
             for url in event.mimeData().urls()
-            if url.isLocalFile() and Path(url.toLocalFile()).suffix.lower() in EXCEL_EXTENSIONS
+            if url.isLocalFile()
+            and Path(url.toLocalFile()).suffix.lower() in EXCEL_EXTENSIONS
         ]
         if paths:
             self.add_excel_files(paths)
@@ -552,7 +593,6 @@ class VinAnalyzerApp(QMainWindow):
                 "font-size: 13px; color: gray; background-color: #f9f9f9;"
             )
 
-
     def select_files_via_dialog(self):
         last_dir = str(self.settings.value("last_open_dir", ""))
         file_paths, _ = QFileDialog.getOpenFileNames(
@@ -566,15 +606,17 @@ class VinAnalyzerApp(QMainWindow):
             self.add_excel_files([Path(path) for path in file_paths])
 
     def clear_files(self):
-        self.loaded_files = list()
-        self.file_data = dict()
+        self.loaded_files = []
+        self.file_data = {}
         self.df_filtered = None
         if self.cache_file.exists():
             try:
                 self.cache_file.unlink()
-            except Exception:
+            except OSError:
                 pass
-        self.drop_zone.setText("Перетащите сюда один или несколько Excel-файлов\nили нажмите «Добавить файлы…»")
+        self.drop_zone.setText(
+            "Перетащите сюда один или несколько Excel-файлов\nили нажмите «Добавить файлы…»"
+        )
         self.reset_drop_zone_style()
         self.reset_results()
         self.status_bar.showMessage("Список файлов и кэш сессии очищены.")
@@ -611,20 +653,27 @@ class VinAnalyzerApp(QMainWindow):
         df = df.rename(columns=rename_dict)
         missing = {"Модель", "VIN", "ДОП ВЕРСИЯ"} - set(df.columns)
         if missing:
-            raise ValueError("В файле отсутствуют обязательные столбцы: " + ", ".join(sorted(missing)))
+            raise ValueError(
+                "В файле отсутствуют обязательные столбцы: "
+                + ", ".join(sorted(missing))
+            )
 
         df = df[["Модель", "VIN", "ДОП ВЕРСИЯ"]].copy()
         model_series = df["Модель"].astype(str).str.strip().str.upper()
         return df.loc[model_series.isin(["LJO", "BJO"])].reset_index(drop=True)
 
-    def _check_date_sequence(self, candidate_files: list[Path], new_files: set[str]) -> bool:
+    def _check_date_sequence(
+        self, candidate_files: list[Path], new_files: set[str]
+    ) -> bool:
         dated = [(path, extract_date_from_filename(path)) for path in candidate_files]
         undated = [(path, file_date) for path, file_date in dated if file_date is None]
-        dated = [(path, file_date) for path, file_date in dated if file_date is not None]
+        dated = [
+            (path, file_date) for path, file_date in dated if file_date is not None
+        ]
         dated.sort(key=lambda item: (item[1], item[0].name.casefold()))
 
-        warnings = list()
-        for (previous_path, previous_date), (next_path, next_date) in zip(dated, dated[1:]):
+        warnings = []
+        for (previous_path, previous_date), (next_path, next_date) in itertools.pairwise(dated):
             if str(previous_path) not in new_files and str(next_path) not in new_files:
                 continue
             difference = (next_date - previous_date).days
@@ -661,9 +710,8 @@ class VinAnalyzerApp(QMainWindow):
             return msg_box.clickedButton() == yes_btn
         return True
 
-
     def add_excel_files(self, file_paths: list[Path]):
-        new_files = list()
+        new_files = []
         known_paths = {str(path) for path in self.loaded_files}
         for path in file_paths:
             path = path.resolve()
@@ -674,7 +722,9 @@ class VinAnalyzerApp(QMainWindow):
                 known_paths.add(str(path))
 
         if not new_files:
-            QMessageBox.information(self, "Файлы", "Новых Excel-файлов для добавления нет.")
+            QMessageBox.information(
+                self, "Файлы", "Новых Excel-файлов для добавления нет."
+            )
             return
 
         candidate_files = sorted(self.loaded_files + new_files, key=file_sort_key)
@@ -685,8 +735,10 @@ class VinAnalyzerApp(QMainWindow):
 
         try:
             newly_read = {str(path): self._read_excel_file(path) for path in new_files}
-        except Exception as exc:
-            QMessageBox.critical(self, "Ошибка загрузки", f"Не удалось обработать файл:\n{exc}")
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.critical(
+                self, "Ошибка загрузки", f"Не удалось обработать файл:\n{exc}"
+            )
             return
 
         self.file_data.update(newly_read)
@@ -694,6 +746,7 @@ class VinAnalyzerApp(QMainWindow):
         self.reset_results()
         self._rebuild_combined_dataframe(restored_from_cache=False)
         self.save_session_cache()
+
     def show_about_dialog(self):
         about_text = (
             '<h3>ПСК "ИСКРА" Расчёт плана</h3>'
@@ -709,20 +762,28 @@ class VinAnalyzerApp(QMainWindow):
     def analyze_data(self, silent: bool = False):
         if self.df_filtered is None or self.df_filtered.empty:
             if not silent:
-                QMessageBox.warning(self, "Предупреждение", "Сначала загрузите корректный Excel-файл или файлы.")
+                QMessageBox.warning(
+                    self,
+                    "Предупреждение",
+                    "Сначала загрузите корректный Excel-файл или файлы.",
+                )
             return
 
         vin_tail = self.vin_input.text().strip()
         plan_str = self.plan_input.text().strip()
         if not vin_tail or not plan_str:
             if not silent:
-                QMessageBox.warning(self, "Предупреждение", "Заполните оба поля: 'VIN' и 'План'.")
+                QMessageBox.warning(
+                    self, "Предупреждение", "Заполните оба поля: 'VIN' и 'План'."
+                )
             return
 
         plan_count = int(plan_str)
         if plan_count <= 0:
             if not silent:
-                QMessageBox.warning(self, "Предупреждение", "План должен быть больше нуля.")
+                QMessageBox.warning(
+                    self, "Предупреждение", "План должен быть больше нуля."
+                )
             return
 
         data = self.df_filtered.copy()
@@ -742,7 +803,9 @@ class VinAnalyzerApp(QMainWindow):
                 )
             return
 
-        df_plan_slice = data.iloc[found_index:found_index + plan_count].copy().fillna("")
+        df_plan_slice = (
+            data.iloc[found_index : found_index + plan_count].copy().fillna("")
+        )
         models_series = df_plan_slice["Модель"].astype(str).str.strip().str.upper()
         extra_series = df_plan_slice["ДОП ВЕРСИЯ"].astype(str).str.strip().str.upper()
         ljo_count = (models_series == "LJO").sum()
@@ -751,7 +814,9 @@ class VinAnalyzerApp(QMainWindow):
         bjo_count = total_bjo - bjoc_count
 
         mode_ljo, mode_bjo_c = self._get_most_common_run_sizes(models_series)
-        self.sequence_ratio_label.setText(f"Очерёдность LJO/BJO(C): {mode_ljo}/{mode_bjo_c}")
+        self.sequence_ratio_label.setText(
+            f"Очерёдность LJO/BJO(C): {mode_ljo}/{mode_bjo_c}"
+        )
 
         self.ljo_counter_label.setText(f"Количество LJO: {ljo_count}")
         self.bjo_counter_label.setText(f"Количество BJO: {bjo_count}")
@@ -763,8 +828,12 @@ class VinAnalyzerApp(QMainWindow):
         self.table_widget.setHorizontalHeaderLabels(list(display_df.columns))
         for row_idx, row in enumerate(display_df.itertuples(index=False, name=None)):
             for col_idx, value in enumerate(row):
-                self.table_widget.setItem(row_idx, col_idx, QTableWidgetItem(str(value)))
-        self.status_bar.showMessage(f"Анализ завершен. Найдено строк в плане: {len(display_df)}")
+                self.table_widget.setItem(
+                    row_idx, col_idx, QTableWidgetItem(str(value))
+                )
+        self.status_bar.showMessage(
+            f"Анализ завершен. Найдено строк в плане: {len(display_df)}"
+        )
 
     @staticmethod
     def _most_common_size(sizes: list[int]) -> int:
@@ -783,7 +852,7 @@ class VinAnalyzerApp(QMainWindow):
 
         simplified = models_series.apply(lambda x: "BJO(C)" if x == "BJO" else x)
 
-        runs = list()
+        runs = []
         current_model = simplified.iloc[0]
         run_len = 1
 
@@ -829,7 +898,9 @@ if __name__ == "__main__":
     QLocale.setDefault(locale)
 
     translator = QTranslator()
-    if translator.load(get_resource_path("qtbase_ru"), get_resource_path("translations")):
+    if translator.load(
+        get_resource_path("qtbase_ru"), get_resource_path("translations")
+    ):
         app.installTranslator(translator)
 
     window = VinAnalyzerApp()
